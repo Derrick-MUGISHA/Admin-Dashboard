@@ -3,15 +3,14 @@ import { useEffect, useState } from 'react';
 import { db } from '@/app/lib/firebase-client';
 import { ref, onValue, query, orderByChild, equalTo, update, set } from 'firebase/database';
 import { UserGroupIcon, DocumentTextIcon, ShieldCheckIcon } from '@heroicons/react/24/outline';
-import dynamic from 'next/dynamic'; // Dynamically import the chart to avoid hydration errors
-
-// Dynamically import the chart (client-side only)
-const BarChart = dynamic(() => import('recharts/es6/chart/BarChart'), { ssr: false });
-const Bar = dynamic(() => import('recharts/es6/cartesian/Bar'), { ssr: false });
-const XAxis = dynamic(() => import('recharts/es6/cartesian/XAxis'), { ssr: false });
-const YAxis = dynamic(() => import('recharts/es6/cartesian/YAxis'), { ssr: false });
-const Tooltip = dynamic(() => import('recharts/es6/component/Tooltip'), { ssr: false });
-const Legend = dynamic(() => import('recharts/es6/component/Legend'), { ssr: false });
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  Legend,
+} from 'recharts';
 
 interface Report {
   id: string;
@@ -25,12 +24,19 @@ interface Report {
   response?: string;
   status: string;
   userId: string;
+  communityMessage?: string;
 }
 
 interface Stats {
   totalUsers: number;
   totalReports: number;
   resolvedReports: number;
+}
+
+interface CommunityData {
+  name: string;
+  reports: number;
+  messages: string[];
 }
 
 export default function AdminDashboard() {
@@ -44,6 +50,22 @@ export default function AdminDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
   const [responseText, setResponseText] = useState('');
+  const [communityData, setCommunityData] = useState<CommunityData[]>([]);
+  const [selectedUser, setSelectedUser] = useState<string | null>(null);
+  const [userMessages, setUserMessages] = useState<string[]>([]);
+
+  // Define theme colors
+  const themeColors = {
+    primary: 'bg-pink-600', // Pink primary color
+    secondary: 'bg-purple-600', // Purple secondary color
+    tertiary: 'bg-fuchsia-500', // Fuchsia tertiary color
+    accent: '#d946ef', // Hex color for charts
+    lightBg: 'bg-pink-50', // Light pink background
+    border: 'border-pink-200', // Pink border
+    text: 'text-purple-900', // Purple text
+    textSecondary: 'text-pink-700', // Pink text
+    hoverBg: 'hover:bg-pink-50', // Hover background color
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -63,6 +85,27 @@ export default function AdminDashboard() {
           });
           setReports(reportsData);
           setStats(prev => ({ ...prev, totalReports: reportsData.length }));
+          
+          // Process community data
+          const communityReports = reportsData.filter(report => report.matterType === 'Community');
+          const communityDataMap = new Map<string, CommunityData>();
+          
+          communityReports.forEach(report => {
+            if (!communityDataMap.has(report.name)) {
+              communityDataMap.set(report.name, {
+                name: report.name,
+                reports: 1,
+                messages: [report.description]
+              });
+            } else {
+              const userData = communityDataMap.get(report.name)!;
+              userData.reports += 1;
+              userData.messages.push(report.description);
+              communityDataMap.set(report.name, userData);
+            }
+          });
+          
+          setCommunityData(Array.from(communityDataMap.values()));
         }, (error) => {
           console.error("Error fetching reports:", error);
           setError("Unable to fetch reports. Please check your permissions.");
@@ -115,7 +158,7 @@ export default function AdminDashboard() {
       await set(notificationRef, {
         type: 'report_response',
         message: `Your report (ID: ${reportId}) has been responded to.`,
-        response: response, // Include the admin's response
+        response: response,
         createdAt: Date.now(),
         read: false
       });
@@ -160,6 +203,16 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleCommunityUserClick = (name: string) => {
+    setSelectedUser(name);
+    const userData = communityData.find(data => data.name === name);
+    if (userData) {
+      setUserMessages(userData.messages);
+    } else {
+      setUserMessages([]);
+    }
+  };
+
   const StatsCard = ({ title, value, icon: Icon, color, onClick }: { 
     title: string; 
     value: number; 
@@ -167,7 +220,7 @@ export default function AdminDashboard() {
     color: string;
     onClick?: () => void;
   }) => (
-    <div className={`p-6 rounded-lg shadow-sm ${color} text-white cursor-pointer`} onClick={onClick}>
+    <div className={`p-6 rounded-lg shadow-md ${color} text-white cursor-pointer transition-transform duration-300 transform hover:scale-105`} onClick={onClick}>
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-medium">{title}</p>
@@ -178,19 +231,32 @@ export default function AdminDashboard() {
     </div>
   );
 
-  // Community Chart Data
-  const communityChartData = reports
-    .filter(report => report.matterType === 'Community')
-    .map(report => ({
-      name: report.name,
-      reports: 1
-    }));
+  // Chart with proper typing
+  const renderCommunityChart = () => {
+    if (!communityData.length) return <p className="text-gray-500">No community reports found.</p>;
+
+    return (
+      <div className="overflow-x-auto">
+        <BarChart 
+          width={600} 
+          height={300} 
+          data={communityData}
+        >
+          <XAxis dataKey="name" />
+          <YAxis />
+          <Tooltip />
+          <Legend />
+          <Bar dataKey="reports" fill={themeColors.accent} />
+        </BarChart>
+      </div>
+    );
+  };
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 p-8">
+      <div className={`min-h-screen ${themeColors.lightBg} p-8`}>
         <div className="max-w-7xl mx-auto">
-          <h1 className="text-3xl font-bold text-gray-900 mb-8">Admin Dashboard</h1>
+          <h1 className={`text-3xl font-bold ${themeColors.text} mb-8`}>Admin Dashboard</h1>
           <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-red-700">
             <h2 className="text-lg font-semibold mb-2">Error</h2>
             <p>{error}</p>
@@ -209,53 +275,56 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
+    <div className={`min-h-screen ${themeColors.lightBg} p-8`}>
       <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold text-gray-900 mb-8">Admin Dashboard</h1>
+        <h1 className={`text-3xl font-bold ${themeColors.text} mb-8`}>Admin Dashboard</h1>
         
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           <StatsCard 
             title="Total Users" 
             value={stats.totalUsers} 
             icon={UserGroupIcon} 
-            color="bg-indigo-600" 
+            color={themeColors.primary}
           />
           <StatsCard 
             title="Total Reports" 
             value={stats.totalReports} 
             icon={DocumentTextIcon}
-            color="bg-red-600" 
+            color={themeColors.secondary}
           />
           <StatsCard 
             title="Resolved Cases" 
             value={stats.resolvedReports} 
             icon={ShieldCheckIcon}
-            color="bg-purple-600" 
+            color={themeColors.tertiary}
           />
         </div>
 
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <div className="p-6 border-b border-gray-200">
-            <h2 className="text-xl font-semibold text-gray-900">Recent Reports</h2>
-            <p className="text-gray-600 mt-1">Manage and respond to user submissions</p>
+        <div className="bg-white rounded-lg shadow-lg overflow-hidden border border-pink-100">
+          <div className={`p-6 border-b ${themeColors.border}`}>
+            <h2 className={`text-xl font-semibold ${themeColors.text}`}>Recent Reports</h2>
+            <p className={`${themeColors.textSecondary} mt-1`}>Manage and respond to user submissions</p>
           </div>
           
-          <div className="divide-y divide-gray-200">
+          <div className="divide-y divide-pink-100">
             {loading ? (
-              <div className="p-6 text-center text-gray-500">Loading reports...</div>
+              <div className="p-6 text-center text-gray-500">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-pink-500 mx-auto mb-4"></div>
+                <p>Loading reports...</p>
+              </div>
             ) : reports.length === 0 ? (
               <div className="p-6 text-center text-gray-500">No reports found</div>
             ) : (
               reports.map(report => (
-                <div key={report.id} className="p-6 hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => handleReportClick(report)}>
+                <div key={report.id} className={`p-6 ${themeColors.hoverBg} transition-colors cursor-pointer`} onClick={() => handleReportClick(report)}>
                   <div className="flex justify-between items-start">
                     <div className="space-y-2 flex-1">
                       <div className="flex items-center gap-2">
-                        <h3 className="text-lg font-medium text-gray-900">{report.name}</h3>
+                        <h3 className={`text-lg font-medium ${themeColors.text}`}>{report.name}</h3>
                         <span className={`px-2 py-1 text-xs rounded-full ${
                           report.status === 'resolved' 
                             ? 'bg-green-100 text-green-800' 
-                            : 'bg-red-100 text-red-800'
+                            : 'bg-pink-100 text-pink-800'
                         }`}>
                           {report.status?.toUpperCase() || 'PENDING'}
                         </span>
@@ -264,6 +333,7 @@ export default function AdminDashboard() {
                       <div className="text-sm text-gray-500">
                         <p>Email: {report.email}</p>
                         <p>Phone: {report.phone}</p>
+                        <p>Type: {report.matterType}</p>
                       </div>
                     </div>
                   </div>
@@ -273,54 +343,119 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Community Chart */}
-        <div className="mt-8 bg-white rounded-lg shadow p-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">Community Reports</h2>
-          {communityChartData.length > 0 ? (
-            <BarChart width={600} height={300} data={communityChartData}>
-              <XAxis dataKey="name" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="reports" fill="#4F46E5" />
-            </BarChart>
-          ) : (
-            <p className="text-gray-500">No community reports found.</p>
-          )}
+        {/* Community Reports Section */}
+        <div className="mt-8 bg-white rounded-lg shadow-lg border border-pink-100">
+          <div className={`p-6 border-b ${themeColors.border}`}>
+            <h2 className={`text-xl font-semibold ${themeColors.text}`}>Community Reports</h2>
+            <p className={`${themeColors.textSecondary} mt-1`}>View and manage community submissions</p>
+          </div>
+          
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 p-6">
+            {/* Chart Panel */}
+            <div className="overflow-x-auto">
+              {renderCommunityChart()}
+              <div className="mt-4 text-sm text-gray-500">
+                <p>Click on a user in the chart to view their messages</p>
+              </div>
+            </div>
+            
+            {/* User Messages Panel */}
+            <div className="border border-pink-100 rounded-lg p-4">
+              <h3 className={`text-lg font-medium ${themeColors.text} mb-4`}>
+                {selectedUser ? `${selectedUser}'s Messages` : 'Select a user to view messages'}
+              </h3>
+              
+              {selectedUser ? (
+                userMessages.length > 0 ? (
+                  <div className="space-y-3 text-gray-600 max-h-96 overflow-y-auto">
+                    {userMessages.map((message, index) => (
+                      <div key={index} className="p-3 bg-pink-50 rounded-lg">
+                        <p>{message}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-gray-500">No messages found for this user.</p>
+                )
+              ) : (
+                <div className="flex flex-col gap-4">
+                  {communityData.map((userData) => (
+                    <div 
+                      key={userData.name}
+                      className={`p-3 border border-pink-100 rounded-lg cursor-pointer hover:bg-pink-50 transition-colors`}
+                      onClick={() => handleCommunityUserClick(userData.name)}
+                    >
+                      <div className="flex justify-between">
+                        <span className="font-medium">{userData.name}</span>
+                        <span className="text-sm text-pink-700">{userData.reports} message(s)</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {selectedUser && (
+                <button 
+                  onClick={() => setSelectedUser(null)}
+                  className="mt-4 px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
+                >
+                  Back to User List
+                </button>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Report Details Modal */}
         {selectedReport && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-            <div className="bg-white rounded-lg p-6 w-full max-w-2xl">
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">Report Details</h2>
-              <p className="text-gray-600">{selectedReport.description}</p>
-              <div className="text-sm text-gray-500 mt-4">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 w-full max-w-2xl shadow-xl border-2 border-pink-200">
+              <h2 className={`text-xl font-semibold ${themeColors.text} mb-4`}>Report Details</h2>
+              <div className="mb-4">
+                <p className="font-medium text-gray-600">From: {selectedReport.name}</p>
+                <p className="text-sm text-black">Report Type: {selectedReport.matterType}</p>
+              </div>
+              <div className="mb-4 p-3 bg-pink-50 rounded-lg">
+                <p className="text-gray-600">{selectedReport.description}</p>
+              </div>
+              <div className="text-sm text-black mb-4">
                 <p>Email: {selectedReport.email}</p>
                 <p>Phone: {selectedReport.phone}</p>
+                <p>Status: {selectedReport.status}</p>
+                <p>Submitted: {new Date(selectedReport.createdAt).toLocaleString()}</p>
+                {selectedReport.resolvedAt && (
+                  <p>Resolved: {new Date(selectedReport.resolvedAt).toLocaleString()}</p>
+                )}
               </div>
-              <textarea
-                className="w-full p-2 mt-4 border rounded-md"
-                placeholder="Enter your response..."
-                value={responseText}
-                onChange={(e) => setResponseText(e.target.value)}
-              />
+              <div className="mt-4">
+                <label htmlFor="response" className="block text-sm font-medium text-black mb-1">
+                  Your Response:
+                </label>
+                <textarea
+                  id="response"
+                  className="w-full p-2 border rounded-md focus:ring-2 focus:ring-pink-300 focus:border-pink-300 outline-none text-black"
+                  placeholder="Enter your response..."
+                  value={responseText}
+                  onChange={(e) => setResponseText(e.target.value)}
+                  rows={4}
+                />
+              </div>
               <div className="mt-4 flex gap-2">
                 <button 
                   onClick={handleResponseSubmit}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-md"
+                  className="px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 transition-colors"
                 >
-                  Submit Response
+                  {selectedReport.status === 'resolved' ? 'Update Response' : 'Submit Response'}
                 </button>
                 <button 
                   onClick={() => handleBlockUser(selectedReport.userId)}
-                  className="px-4 py-2 bg-red-600 text-white rounded-md"
+                  className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
                 >
                   Block User
                 </button>
                 <button 
                   onClick={() => setSelectedReport(null)}
-                  className="px-4 py-2 bg-gray-600 text-white rounded-md"
+                  className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
                 >
                   Close
                 </button>
